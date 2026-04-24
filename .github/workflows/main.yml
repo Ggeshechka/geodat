@@ -57,7 +57,7 @@ jobs:
         run: |
           cd community
           go run ./main.go --datapath=./data --exportlists=category-ru,category-ads-all,private
-          mv geosite.dat ../publish/
+          mv dlc.dat ../publish/geosite.dat
 
       - name: Generate hashes
         run: |
