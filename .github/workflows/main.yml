@@ -1,0 +1,63 @@
+name: Build Minimal V2Ray Rules
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 22 * * *"
+  push:
+    branches:
+      - master
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup variables
+        run: echo "RELEASE_NAME=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.22'
+
+      - name: Build geoip.dat (RU, PRIVATE)
+        run: |
+          mkdir -p publish geoip_data
+          # Берем чистые агрегированные списки из официального репозитория
+          curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/ru.txt > geoip_data/ru
+          curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/private.txt > geoip_data/private
+          
+          # Собираем бинарник
+          go install github.com/v2fly/geoip/commands/geoip@latest
+          geoip -data=geoip_data
+          mv geoip.dat publish/
+
+      - name: Checkout v2fly/domain-list-community
+        uses: actions/checkout@v4
+        with:
+          repository: v2fly/domain-list-community
+          path: community
+
+      - name: Build geosite.dat (category-ru, category-ads-all, private)
+        run: |
+          cd community
+          # Флаг --exportlists собирает файл только с указанными категориями
+          go run ./main.go --datapath=./data --exportlists=category-ru,category-ads-all,private
+          mv geosite.dat ../publish/
+
+      - name: Generate hashes
+        run: |
+          cd publish
+          sha256sum geoip.dat > geoip.dat.sha256sum
+          sha256sum geosite.dat > geosite.dat.sha256sum
+
+      - name: Release and upload assets
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: ${{ env.RELEASE_NAME }}
+          tag: "latest" # Или ${{ env.RELEASE_NAME }}, если нужна история
+          overwrite: true
+          file_glob: true
+          file: ./publish/*
