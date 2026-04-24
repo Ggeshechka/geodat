@@ -25,22 +25,18 @@ jobs:
         run: |
           mkdir -p publish geoip_data
           
-          # 1. Скачиваем чистые агрегированные списки
+          # 1. Скачиваем чистые списки в нашу папку geoip_data
           curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/ru.txt > geoip_data/ru
           curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/private.txt > geoip_data/private
           
-          # 2. Клонируем официальный репозиторий-сборщик
+          # 2. Клонируем официальный сборщик
           git clone https://github.com/v2fly/geoip.git geoip-builder
           cd geoip-builder
           
-          # 3. Очищаем их стандартную папку с кучей стран и кладем наши 2 файла
-          rm -rf data/*
-          cp ../geoip_data/* data/
+          # 3. Запускаем сборку и указываем путь к нашей папке (на уровень выше)
+          go run . -data=../geoip_data
           
-          # 4. Запускаем сборку (Go сам скачает нужные локальные зависимости)
-          go run .
-          
-          # 5. Забираем готовый бинарник
+          # 4. Переносим результат в папку для релиза
           mv geoip.dat ../publish/
           cd ..
 
