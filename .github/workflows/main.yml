@@ -24,14 +24,25 @@ jobs:
       - name: Build geoip.dat (RU, PRIVATE)
         run: |
           mkdir -p publish geoip_data
-          # Берем чистые агрегированные списки из официального репозитория
+          
+          # 1. Скачиваем чистые агрегированные списки
           curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/ru.txt > geoip_data/ru
           curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/private.txt > geoip_data/private
           
-          # Собираем бинарник
-          go install github.com/v2fly/geoip/commands/geoip@latest
-          geoip -data=geoip_data
-          mv geoip.dat publish/
+          # 2. Клонируем официальный репозиторий-сборщик
+          git clone https://github.com/v2fly/geoip.git geoip-builder
+          cd geoip-builder
+          
+          # 3. Очищаем их стандартную папку с кучей стран и кладем наши 2 файла
+          rm -rf data/*
+          cp ../geoip_data/* data/
+          
+          # 4. Запускаем сборку (Go сам скачает нужные локальные зависимости)
+          go run .
+          
+          # 5. Забираем готовый бинарник
+          mv geoip.dat ../publish/
+          cd ..
 
       - name: Checkout v2fly/domain-list-community
         uses: actions/checkout@v4
