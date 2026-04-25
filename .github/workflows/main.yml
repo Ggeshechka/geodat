@@ -1,71 +1,120 @@
-name: Build Custom V2Ray rules dat files
+name: Build Minimal V2Ray Rules
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 22 * * *"
+    - cron: "0 20 * * *"
   push:
-    branches:
-      - master
-    paths-ignore:
-      - "**/README.md"
+    branches: [master]
+    paths:
+      - ".github/workflows/build-rules.yml"
+
 permissions:
   contents: write
+
+env:
+  RELEASE_NAME: "rules-$(date +%Y%m%d)"
+  TAG_NAME: "v$(date +%Y%m%d)"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Set variables
-        run: |
-          echo "RELEASE_NAME=Released on $(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-          echo "TAG_NAME=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '^1.22'
+          go-version: "1.21"
+          cache: true
 
-      - name: Build geoip.dat (ru, private)
+      # ========== GEOIP: private + ru ==========
+      - name: Build geoip.dat
         run: |
-          mkdir -p publish geoip_data
-          curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/ru.txt > geoip_data/ru.txt
-          curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/private.txt > geoip_data/private.txt
+          git clone --depth=1 https://github.com/Loyalsoldier/geoip geoip-src
+          cd geoip-src
           
-          git clone https://github.com/v2fly/geoip.git geoip-builder
-          cd geoip-builder
-          
-          cat <<EOF > config.json
+          cat > config.json << 'EOF'
           {
             "input": [
-              {"type": "text", "action": "add", "args": {"name": "ru", "uri": "../geoip_data/ru.txt"}},
-              {"type": "text", "action": "add", "args": {"name": "private", "uri": "../geoip_data/private.txt"}}
+              {
+                "type": "maxmindGeoLite2CountryCSV",
+                "action": "add",
+                "args": {
+                  "country": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Locations-en.csv",
+                  "ipv4": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Blocks-IPv4.csv",
+                  "ipv6": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Blocks-IPv6.csv",
+                  "wantedList": ["ru"]
+                }
+              },              { "type": "private", "action": "add" }
             ],
             "output": [
-              {"type": "v2rayGeoIPDat", "action": "output", "args": {"outputDir": "../publish", "outputName": "geoip.dat"}}
+              {
+                "type": "v2rayGeoIPDat",
+                "action": "output",
+                "args": {
+                  "outputName": "geoip.dat",
+                  "wantedList": ["private", "ru"]
+                }
+              }
             ]
           }
           EOF
-          go run ./
-          cd ..
+          
+          go run ./ convert -c config.json
+          mkdir -p ../publish
+          cp output/dat/geoip.dat ../publish/
+          sha256sum output/dat/geoip.dat | awk '{print $1}' > ../publish/geoip.dat.sha256sum
 
-      - name: Checkout v2fly/domain-list-community
-        uses: actions/checkout@v4
-        with:
-          repository: v2fly/domain-list-community
-          path: community
-
-      - name: Build geosite.dat (category-ru, category-ads-all, private)
+      # ========== GEOSITE: private + category-ru ==========
+      - name: Build geosite.dat
         run: |
-          cd community
-          go run ./main.go --datapath=./data --exportlists=category-ru,category-ads-all,private
-          mv dlc.dat ../publish/geosite.dat
+          git clone --depth=1 https://github.com/Loyalsoldier/domain-list-custom dlc-src
+          mkdir -p dlc-src/data
+          
+          # private: локальные домены
+          cat > dlc-src/data/private << 'EOF'
+          full:localhost
+          regexp:.*\.local$
+          regexp:.*\.lan$
+          keyword:intranet
+          EOF
+          
+          # category-ru: автоматическая загрузка из открытого источника
+          curl -sSL "https://raw.githubusercontent.com/217heidai/geosite-generator/main/data/ru" | \
+            grep -vE '^\s*(#|$)' | \
+            sed 's/^/domain:/g' | \
+            sort -u > dlc-src/data/category-ru
+          
+          cd dlc-src
+          go run ./ --datapath=./data --outputname=geosite.dat
+          mkdir -p ../publish
+          cp publish/geosite.dat ../publish/
+          sha256sum publish/geosite.dat | awk '{print $1}' > ../publish/geosite.dat.sha256sum
 
-      - name: Generate hashes
+      # ========== ИНДЕКС ДЛЯ КЛИЕНТА ==========
+      - name: Generate index.json
         run: |
-          cd publish
-          sha256sum geoip.dat > geoip.dat.sha256sum
-          sha256sum geosite.dat > geosite.dat.sha256sum
+          cd publish          cat > index.json << EOF
+          {
+            "version": "$(date +%Y%m%d%H%M)",
+            "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "files": {
+              "geoip.dat": {
+                "url": "https://cdn.jsdelivr.net/gh/${{ github.repository }}@release/geoip.dat",
+                "sha256": "$(cat geoip.dat.sha256sum)"
+              },
+              "geosite.dat": {
+                "url": "https://cdn.jsdelivr.net/gh/${{ github.repository }}@release/geosite.dat",
+                "sha256": "$(cat geosite.dat.sha256sum)"
+              }
+            }
+          }
+          EOF
 
-      - name: Release and upload assets
+      # ========== ПУБЛИКАЦИЯ ==========
+      - name: Upload to GitHub Release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
@@ -73,22 +122,22 @@ jobs:
           tag: ${{ env.TAG_NAME }}
           file_glob: true
           file: ./publish/*
+          overwrite: true
 
-      - name: Git push assets to "release" branch
+      - name: Push to release branch
         run: |
           cd publish
           git init
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b release
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b release || git checkout release
           git add .
-          git commit -m "${{ env.RELEASE_NAME }}"
-          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git commit -m "chore: update ${{ env.TAG_NAME }}" || exit 0
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
           git push -f -u origin release
 
-      - name: Purge jsdelivr CDN
+      - name: Purge jsDelivr CDN
         run: |
-          cd publish
-          for file in $(ls); do
-            curl -i "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}"
+          for file in geoip.dat geosite.dat index.json; do
+            curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}" > /dev/null
           done
