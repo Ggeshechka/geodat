@@ -1,4 +1,4 @@
-name: DEBUG - Gather Info for Rules Build
+name: "DEBUG - Gather Info for Rules Build"
 
 on:
   workflow_dispatch:
@@ -10,27 +10,26 @@ jobs:
   debug:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: "Setup Go"
         uses: actions/setup-go@v5
         with:
           go-version: "1.21"
           cache: true
 
-      - name: === ENV INFO ===
+      - name: "ENV INFO"
         run: |
           echo "Runner: $(uname -a)"
           echo "Go: $(go version)"
           echo "PWD: $(pwd)"
           echo "LS: $(ls -la)"
 
-      # ========== GEOIP REPO ==========
-      - name: Clone geoip repo
+      - name: "Clone geoip repo"
         run: git clone --depth=1 https://github.com/Loyalsoldier/geoip geoip-src
 
-      - name: GEOIP: structure
+      - name: "GEOIP: structure"
         run: |
           cd geoip-src
           echo "--- Branches ---"
@@ -47,7 +46,8 @@ jobs:
           go run ./ --help 2>&1 || true
           echo "--- Subcommands ---"
           go run ./ 2>&1 | head -30 || true
-      - name: === GEOIP: check data sources ===
+
+      - name: "GEOIP: check data sources"     
         run: |
           cd geoip-src
           echo "--- Trying release branch ---"
@@ -57,27 +57,22 @@ jobs:
           curl -sI "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/GeoLite2-Country-CSV.zip" | head -3
           curl -sI "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Locations-en.csv" | head -3
 
-      - name: GEOIP: test config generation
+      - name: "GEOIP: test config generation"
         run: |
           cd geoip-src
-          # Пробуем скачать и распаковать архив
           mkdir -p test-data
           if curl -sSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/GeoLite2-Country-CSV.zip" -o test-data/data.zip; then
             unzip -l test-data/data.zip | head -20
             unzip -q test-data/data.zip -d test-data/
             echo "--- Extracted files ---"
             find test-data -name "*.csv" | head -10
-            # Пробуем создать минимальный config
             LOC=$(find test-data -name "GeoLite2-Country-Locations-en.csv" | head -1)
             V4=$(find test-data -name "GeoLite2-Country-Blocks-IPv4.csv" | head -1)
             V6=$(find test-data -name "GeoLite2-Country-Blocks-IPv6.csv" | head -1)
             echo "LOC=$LOC"
             echo "V4=$V4"
             echo "V6=$V6"
-            # Пробуем запустить convert с минимальным конфиг
-            cat > test-config.json << TESTEOF
-            {"input":[{"type":"private","action":"add"}],"output":[{"type":"v2rayGeoIPDat","action":"output","args":{"outputName":"test.dat","wantedList":["private"]}}]}
-            TESTEOF
+            echo '{"input":[{"type":"private","action":"add"}],"output":[{"type":"v2rayGeoIPDat","action":"output","args":{"outputName":"test.dat","wantedList":["private"]}}]}' > test-config.json
             echo "--- Running convert with private only ---"
             go run ./ convert -c test-config.json 2>&1 || true
             ls -la output/dat/ 2>/dev/null || echo "No output"
@@ -85,25 +80,25 @@ jobs:
             echo "Failed to download CSV zip"
           fi
 
-      # ========== GEOSITE REPO ==========
-      - name: Clone domain-list-custom repo
+      - name: "Clone domain-list-custom repo"
         run: git clone --depth=1 https://github.com/Loyalsoldier/domain-list-custom dlc-src
 
-      - name: === GEOSITE: structure ===
+      - name: "GEOSITE: structure"
         run: |
           cd dlc-src
           echo "--- Root files ---"
           ls -la
           echo "--- go.mod ---"
           cat go.mod 2>/dev/null || echo "No go.mod"
-          echo "--- main.go ---"          head -50 main.go 2>/dev/null || echo "No main.go"
+          echo "--- main.go ---"
+          head -50 main.go 2>/dev/null || echo "No main.go"
           echo "--- Help / flags ---"
           go run ./ --help 2>&1
           echo "--- Available flags parsed ---"
           go run ./ --help 2>&1 | grep -E '^\s*-' || true
 
-      - name: === GEOSITE: data folder ===
-        run: |
+      - name: "GEOSITE: data folder"    
+       run: |
           cd dlc-src
           echo "--- data/ contents ---"
           ls -la data/ 2>/dev/null || echo "No data folder"
@@ -112,7 +107,7 @@ jobs:
           echo "--- Sample list: cn ---"
           cat data/cn 2>/dev/null | head -10 || echo "No cn list"
 
-      - name: === GEOSITE: test build with minimal data ===
+      - name: "GEOSITE: test build with minimal data"
         run: |
           cd dlc-src
           mkdir -p test-data
@@ -123,41 +118,34 @@ jobs:
           echo "--- Output files ---"
           ls -la publish/ 2>/dev/null || echo "No publish folder"
 
-      - name: === SAVE DEBUG LOGS ===
+      - name: "SAVE DEBUG LOGS"
         run: |
           mkdir -p debug-logs
-          # Сохраняем ключевую информацию в артефакты
           {
             echo "### GEOIP"
             echo "go run ./ --help:"
             cd geoip-src && go run ./ --help 2>&1
-            echo -e "\n### GEOSITE"
+            echo ""
+            echo "### GEOSITE"
             cd ../dlc-src && go run ./ --help 2>&1
           } > debug-logs/help-output.txt
-          
           {
             echo "### GEOIP structure"
-            cd geoip-src && find . -maxdepth 4 -type f -name "*.go" -o -name "*.json" -o -name "go.*" | head -30
-            echo -e "\n### GEOSITE structure"
-            cd ../dlc-src && find . -maxdepth 4 -type f -name "*.go" -o -name "go.*" | head -30
+            cd geoip-src && find . -maxdepth 4 -type f \( -name "*.go" -o -name "*.json" -o -name "go.*" \) | head -30
+            echo ""
+            echo "### GEOSITE structure"
+            cd ../dlc-src && find . -maxdepth 4 -type f \( -name "*.go" -o -name "go.*" \) | head -30
           } > debug-logs/file-structure.txt
 
-      - name: Upload debug logs
+      - name: "Upload debug logs"
         uses: actions/upload-artifact@v4
         with:
-          name: debug-logs 
+          name: debug-logs
           path: debug-logs/
           retention-days: 7
 
-      - name: === SUMMARY ===
+      - name: "SUMMARY"
         run: |
-          echo "## 🔍 Debug Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- geoip-src: $(ls geoip-src 2>/dev/null | wc -l) files" >> $GITHUB_STEP_SUMMARY
-          echo "- dlc-src: $(ls dlc-src 2>/dev/null | wc -l) files" >> $GITHUB_STEP_SUMMARY
+          echo "## Debug Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- geoip-src: $(ls geoip-src 2>/dev/null | wc -l) files" >> $GITHUB_STEP_SUMMARY          echo "- dlc-src: $(ls dlc-src 2>/dev/null | wc -l) files" >> $GITHUB_STEP_SUMMARY
           echo "- Logs uploaded as artifact 'debug-logs'" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "👉 Скачай артефакт и проверь:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Какие флаги поддерживает geoip (convert? build?)" >> $GITHUB_STEP_SUMMARY
-          echo "2. Какие флаги поддерживает domain-list-custom (-datname? -outputname?)" >> $GITHUB_STEP_SUMMARY
-          echo "3. Где лежат исходные CSV-файлы в geoip" >> $GITHUB_STEP_SUMMARY
-          echo "4. Работает ли сборка с минимальными данными" >> $GITHUB_STEP_SUMMARY
