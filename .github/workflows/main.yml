@@ -35,19 +35,29 @@ jobs:
           git clone --depth=1 https://github.com/Loyalsoldier/geoip geoip-src
           cd geoip-src
           
-          cat > config.json << 'EOF'
+          # Скачиваем архив с данными из release-ветки
+          mkdir -p geolite2
+          curl -sSL "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/GeoLite2-Country-CSV.zip" -o geolite2/GeoLite2-Country-CSV.zip
+          unzip -q geolite2/GeoLite2-Country-CSV.zip -d geolite2/
+          
+          # Находим файлы внутри распакованной папки (имена содержат дату)
+          GEOIP_LOC=$(find geolite2 -name "GeoLite2-Country-Locations-en.csv" | head -1)
+          GEOIP_V4=$(find geolite2 -name "GeoLite2-Country-Blocks-IPv4.csv" | head -1)
+          GEOIP_V6=$(find geolite2 -name "GeoLite2-Country-Blocks-IPv6.csv" | head -1)
+          
+          cat > config.json << EOF
           {
-            "input": [
-              {
+            "input": [              {
                 "type": "maxmindGeoLite2CountryCSV",
                 "action": "add",
                 "args": {
-                  "country": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Locations-en.csv",
-                  "ipv4": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Blocks-IPv4.csv",
-                  "ipv6": "https://raw.githubusercontent.com/Loyalsoldier/geoip/master/geolite2/GeoLite2-Country-Blocks-IPv6.csv",
+                  "country": "${GEOIP_LOC}",
+                  "ipv4": "${GEOIP_V4}",
+                  "ipv6": "${GEOIP_V6}",
                   "wantedList": ["ru"]
                 }
-              },              { "type": "private", "action": "add" }
+              },
+              { "type": "private", "action": "add" }
             ],
             "output": [
               {
@@ -81,13 +91,12 @@ jobs:
           keyword:intranet
           EOF
           
-          # category-ru: автоматическая загрузка из открытого источника
-          curl -sSL "https://raw.githubusercontent.com/217heidai/geosite-generator/main/data/ru" | \
-            grep -vE '^\s*(#|$)' | \
-            sed 's/^/domain:/g' | \
+          # category-ru: автоматическая загрузка из надёжного источника
+          curl -sSL https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf | \
+            grep -E '\.(ru|рф)/' | \
+            perl -ne '/\/([^\/]+\.(ru|рф))\// && print "domain:$1\n"' | \
             sort -u > dlc-src/data/category-ru
-          
-          cd dlc-src
+                    cd dlc-src
           go run ./ --datapath=./data --outputname=geosite.dat
           mkdir -p ../publish
           cp publish/geosite.dat ../publish/
@@ -96,7 +105,8 @@ jobs:
       # ========== ИНДЕКС ДЛЯ КЛИЕНТА ==========
       - name: Generate index.json
         run: |
-          cd publish          cat > index.json << EOF
+          cd publish
+          cat > index.json << EOF
           {
             "version": "$(date +%Y%m%d%H%M)",
             "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -135,7 +145,6 @@ jobs:
           git commit -m "chore: update ${{ env.TAG_NAME }}" || exit 0
           git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
           git push -f -u origin release
-
       - name: Purge jsDelivr CDN
         run: |
           for file in geoip.dat geosite.dat index.json; do
