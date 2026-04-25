@@ -5,9 +5,13 @@ on:
   schedule:
     - cron: "0 20 * * *"
   push:
-    branches: [master]
     paths:
       - ".github/workflows/build-rules.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/build-rules.yml"
+    branches:
+      - "**"
 
 permissions:
   contents: write
@@ -43,11 +47,11 @@ jobs:
           GEOIP_V4=$(find geolite2 -name "GeoLite2-Country-Blocks-IPv4.csv" | head -1)
           GEOIP_V6=$(find geolite2 -name "GeoLite2-Country-Blocks-IPv6.csv" | head -1)
           
-          cat > config.json << EOF
-          {
+          cat > config.json << EOF          {
             "input": [
               {
-                "type": "maxmindGeoLite2CountryCSV",                "action": "add",
+                "type": "maxmindGeoLite2CountryCSV",
+                "action": "add",
                 "args": {
                   "country": "${GEOIP_LOC}",
                   "ipv4": "${GEOIP_V4}",
@@ -81,7 +85,6 @@ jobs:
           git clone --depth=1 https://github.com/Loyalsoldier/domain-list-custom dlc-src
           mkdir -p dlc-src/data
           
-          # private: локальные домены
           cat > dlc-src/data/private << 'EOF'
           full:localhost
           regexp:.*\.local$
@@ -89,14 +92,12 @@ jobs:
           keyword:intranet
           EOF
           
-          # category-ru: загрузка из надёжного источника
           curl -sSL https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf | \
             grep -E '\.(ru|рф)/' | \
             perl -ne '/\/([^\/]+\.(ru|рф))\// && print "domain:$1\n"' | \
             sort -u > dlc-src/data/category-ru
-          
-          cd dlc-src
-          # Исправленный флаг: -datname вместо -outputname          go run ./ --datapath=./data -datname=geosite.dat
+                    cd dlc-src
+          go run ./ --datapath=./data -datname=geosite.dat
           mkdir -p ../publish
           cp publish/geosite.dat ../publish/
           sha256sum publish/geosite.dat | awk '{print $1}' > ../publish/geosite.dat.sha256sum
@@ -144,8 +145,8 @@ jobs:
           git commit -m "chore: update ${{ env.TAG_NAME }}" || exit 0
           git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
           git push -f -u origin release
-
-      - name: Purge jsDelivr CDN        run: |
+      - name: Purge jsDelivr CDN
+        run: |
           for file in geoip.dat geosite.dat index.json; do
             curl -s "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}" > /dev/null
           done
