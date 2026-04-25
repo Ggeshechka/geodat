@@ -1,4 +1,4 @@
-name: Build Custom V2Ray rules dat files
+name: Build Custom V2Ray rules (Loyalsoldier Edition)
 on:
   workflow_dispatch:
   schedule:
@@ -24,27 +24,28 @@ jobs:
         with:
           go-version: '^1.22'
 
-      - name: Build geoip.dat (ru, private)
+      - name: Build geoip.dat via Loyalsoldier/geoip
         run: |
           mkdir -p publish geoip_data
+          # Скачиваем только RU. Локальные адреса (private) утилита Loyalsoldier генерирует сама.
           curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/ru.txt > geoip_data/ru.txt
-          curl -sSL https://raw.githubusercontent.com/v2fly/geoip/release/text/private.txt > geoip_data/private.txt
           
-          git clone https://github.com/v2fly/geoip.git geoip-builder
+          git clone https://github.com/Loyalsoldier/geoip.git geoip-builder
           cd geoip-builder
           
           cat <<EOF > config.json
           {
             "input": [
               {"type": "text", "action": "add", "args": {"name": "ru", "uri": "../geoip_data/ru.txt"}},
-              {"type": "text", "action": "add", "args": {"name": "private", "uri": "../geoip_data/private.txt"}}
+              {"type": "private", "action": "add", "args": {"name": "private"}}
             ],
             "output": [
               {"type": "v2rayGeoIPDat", "action": "output", "args": {"outputDir": "../publish", "outputName": "geoip.dat"}}
             ]
           }
           EOF
-          go run ./
+          # Используем команду convert, как указано в документации Loyalsoldier
+          go run ./ convert -c config.json
           cd ..
 
       - name: Checkout v2fly/domain-list-community
@@ -53,11 +54,20 @@ jobs:
           repository: v2fly/domain-list-community
           path: community
 
-      - name: Build geosite.dat (category-ru, category-ads-all, private)
+      - name: Checkout Loyalsoldier/domain-list-custom
+        uses: actions/checkout@v4
+        with:
+          repository: Loyalsoldier/domain-list-custom
+          path: custom
+
+      - name: Build geosite.dat via Loyalsoldier/domain-list-custom
         run: |
-          cd community
-          go run ./main.go --datapath=./data --exportlists=category-ru,category-ads-all,private
-          mv dlc.dat ../publish/geosite.dat
+          cd custom
+          # Собираем базу с фильтрами Loyalsoldier, но только нужные категории
+          go run ./ --datapath=../community/data --exportlists=category-ru,category-ads-all,private
+          # Эта утилита всегда кладет результат в папку publish внутри себя
+          mv ./publish/geosite.dat ../publish/geosite.dat
+          cd ..
 
       - name: Generate hashes
         run: |
@@ -90,5 +100,5 @@ jobs:
         run: |
           cd publish
           for file in $(ls); do
-            curl -i "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}"
+            curl -s -i "https://purge.jsdelivr.net/gh/${{ github.repository }}@release/${file}" > /dev/null
           done
